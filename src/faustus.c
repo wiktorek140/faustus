@@ -49,7 +49,7 @@
 #include <linux/dmi.h>
 
 #include <linux/version.h>
-#if LINUX_VERSION_CODE > KERNEL_VERSION(5,6,0)
+#if (LINUX_VERSION_CODE > KERNEL_VERSION(5, 6, 0))
 #include <linux/units.h>
 #else
 #define ABSOLUTE_ZERO_MILLICELSIUS -273150
@@ -529,6 +529,69 @@ static ssize_t charge_control_end_threshold_show(struct device *device,
 }
 
 static DEVICE_ATTR_RW(charge_control_end_threshold);
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0))
+static int asus_wmi_battery_add(struct power_supply *battery, struct acpi_battery_hook *hook)
+#else
+static int asus_wmi_battery_add(struct power_supply *battery)
+#endif
+{
+	/* The WMI method does not provide a way to specific a battery, so we
+	 * just assume it is the first battery.
+	 * Note: On some newer ASUS laptops (Zenbook UM431DA), the primary/first
+	 * battery is named BATT.
+	 */
+	if (strcmp(battery->desc->name, "BAT0") != 0 &&
+	    strcmp(battery->desc->name, "BAT1") != 0 &&
+	    strcmp(battery->desc->name, "BATC") != 0 &&
+	    strcmp(battery->desc->name, "BATT") != 0)
+		return -ENODEV;
+
+	if (device_create_file(&battery->dev,
+	    &dev_attr_charge_control_end_threshold))
+		return -ENODEV;
+
+	/* The charge threshold is only reset when the system is power cycled,
+	 * and we can't get the current threshold so let set it to 100% when
+	 * a battery is added.
+	 */
+	asus_wmi_set_devstate(ASUS_WMI_DEVID_RSOC, 100, NULL);
+	charge_end_threshold = 100;
+
+	return 0;
+}
+
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 2, 0))
+static int asus_wmi_battery_remove(struct power_supply *battery, struct acpi_battery_hook *hook)
+#else
+static int asus_wmi_battery_remove(struct power_supply *battery)
+#endif
+{
+	device_remove_file(&battery->dev,
+			   &dev_attr_charge_control_end_threshold);
+	return 0;
+}
+
+static struct acpi_battery_hook battery_hook = {
+	.add_battery = asus_wmi_battery_add,
+	.remove_battery = asus_wmi_battery_remove,
+	.name = "ASUS Battery Extension",
+};
+
+static void asus_wmi_battery_init(struct asus_wmi *asus)
+{
+	asus->battery_rsoc_available = false;
+	if (asus_wmi_dev_is_present(asus, ASUS_WMI_DEVID_RSOC)) {
+		asus->battery_rsoc_available = true;
+		battery_hook_register(&battery_hook);
+	}
+}
+
+static void asus_wmi_battery_exit(struct asus_wmi *asus)
+{
+	if (asus->battery_rsoc_available)
+		battery_hook_unregister(&battery_hook);
+}
 
 /* LEDs ***********************************************************************/
 
@@ -3256,9 +3319,9 @@ static struct asus_wmi_driver asus_nb_wmi_driver = {
 static int asus_wmi_add(struct platform_device *pdev)
 {
 	struct asus_wmi *asus;
-	#if LINUX_VERSION_CODE < KERNEL_VERSION(6,1,1)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 1))
 	const char *chassis_type;
-	#endif
+#endif
 	acpi_status status;
 	int err;
 	u32 result;
@@ -3321,10 +3384,20 @@ static int asus_wmi_add(struct platform_device *pdev)
 
 	if (asus->driver->quirks->wmi_force_als_set)
 		asus_wmi_set_als();
- #if LINUX_VERSION_CODE < KERNEL_VERSION(6,1,1)
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 1))
 	/* Some Asus desktop boards export an acpi-video backlight interface,
 	   stop this from showing up */
 	chassis_type = dmi_get_system_info(DMI_CHASSIS_TYPE);
+
+	if (chassis_type && !strcmp(chassis_type, "3"))
+		acpi_video_set_dmi_backlight_type(acpi_backlight_vendor);
+
+	if (asus->driver->quirks->wmi_backlight_power)
+		acpi_video_set_dmi_backlight_type(acpi_backlight_vendor);
+
+	if (asus->driver->quirks->wmi_backlight_native)
+		acpi_video_set_dmi_backlight_type(acpi_backlight_native);
+#endif
 
 	if (asus->driver->quirks->xusb2pr)
 		asus_wmi_set_xusb2pr(asus);
