@@ -2,7 +2,7 @@
 
 Experimental unofficial Linux platform driver module for ASUS TUF Gaming series laptops. 
 
-It is a backport of the asus-wmi / asus-nb-wmi drivers from the mainline + RGB backlight crudely cut-down to be useful for these laptops and packed as a DKMS module for 4.x / 5.x kernels.
+It is a backport of the asus-wmi / asus-nb-wmi drivers from the mainline + RGB backlight crudely cut-down to be useful for these laptops and packed as a DKMS module for 4.x / 5.x / 6.x kernels.
 
 **How to decide if I should use it?**
 
