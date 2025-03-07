@@ -2558,6 +2558,19 @@ static void asus_wmi_fnlock_update(struct asus_wmi *asus)
 
 /* WMI events *****************************************************************/
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+static int asus_wmi_get_event_code(union acpi_object *obj)
+{
+	int code;
+
+	if (obj && obj->type == ACPI_TYPE_INTEGER)
+		code = (int)(obj->integer.value & WMI_EVENT_MASK);
+	else
+		code = -EIO;
+
+	return code;
+}
+#else 
 static int asus_wmi_get_event_code(u32 value)
 {
 	struct acpi_buffer response = { ACPI_ALLOCATE_BUFFER, NULL };
@@ -2582,6 +2595,7 @@ static int asus_wmi_get_event_code(u32 value)
 	kfree(obj);
 	return code;
 }
+#endif
 
 static void asus_wmi_handle_aura_event(struct asus_wmi *asus, int direction)
 {
@@ -2823,14 +2837,22 @@ static void asus_wmi_handle_event_code(int code, struct asus_wmi *asus)
 		pr_info("Unknown key %x pressed\n", code);
 }
 
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+static void asus_wmi_notify(union acpi_object *obj, void *context)
+#else 
 static void asus_wmi_notify(u32 value, void *context)
+#endif
 {
 	struct asus_wmi *asus = context;
 	int code;
 	int i;
 
 	for (i = 0; i < WMI_EVENT_QUEUE_SIZE + 1; i++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		code = asus_wmi_get_event_code(obj);
+#else 
 		code = asus_wmi_get_event_code(value);
+#endif
 		if (code < 0) {
 			pr_warn("Failed to get notify code: %d\n", code);
 			return;
@@ -2845,7 +2867,12 @@ static void asus_wmi_notify(u32 value, void *context)
 		 * Double check that queue is present:
 		 * ATK (with queue) uses 0xff, ASUSWMI (without) 0xd2.
 		 */
-		if (!asus->wmi_event_queue || value != WMI_EVENT_VALUE_ATK)
+		if (!asus->wmi_event_queue
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+			|| code != WMI_EVENT_VALUE_ATK)
+#else 
+			|| value != WMI_EVENT_VALUE_ATK)
+#endif
 			return;
 	}
 
@@ -2856,9 +2883,16 @@ static int asus_wmi_notify_queue_flush(struct asus_wmi *asus)
 {
 	int code;
 	int i;
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+	union acpi_object *obj;
+#endif
 
 	for (i = 0; i < WMI_EVENT_QUEUE_SIZE + 1; i++) {
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+		code = asus_wmi_get_event_code(obj);
+#else 
 		code = asus_wmi_get_event_code(WMI_EVENT_VALUE_ATK);
+#endif
 		if (code < 0) {
 			pr_warn("Failed to get event during flush: %d\n", code);
 			return code;
@@ -3446,8 +3480,11 @@ fail_platform:
 	kfree(asus);
 	return err;
 }
-
+#if (LINUX_VERSION_CODE >= KERNEL_VERSION(6, 12, 0))
+static void asus_wmi_remove(struct platform_device *device)
+#else
 static int asus_wmi_remove(struct platform_device *device)
+#endif
 {
 	struct asus_wmi *asus;
 
@@ -3463,7 +3500,9 @@ static int asus_wmi_remove(struct platform_device *device)
 	asus_fan_set_auto(asus);
 
 	kfree(asus);
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(6, 12, 0))
 	return 0;
+#endif
 }
 
 /* Platform driver - hibernate/resume callbacks *******************************/
